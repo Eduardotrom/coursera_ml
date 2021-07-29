@@ -1,0 +1,90 @@
+---
+title: "Course project"
+author: "Eduardo Tapia Romero"
+date: "21/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Practical Machine Learning Proyect
+#Introduction
+The proyect's objective is to train a machine learning model that can accurately classify the manner in wich they did the excercise.
+
+#Data Observation
+In order to decide which models can be used to do the predictions, we must observe our dataset,  and understand which variables we have and how does they relate to each other, also it's very important to check for NA and variables that are mostly constyant througout the observations because this ones won't give us any meaningful information.
+Also it's very important to understand the possible underlying relationships between variables to do that a correlation matrix is a very good tool since it can tell us if there is some kinde of relationship in the behavior of the different possible predictors, even if the correlation itself does not mean that one variable has a true relationship with anotherona, if there are no correleation predictors, the possibility of accurately fitting a model to the dataset is extremely low.
+```{r load}
+library(caret);library(ggplot2);library(doParallel);library(rattle);library(randomForest)
+library(corrplot)
+set.seed(192837)
+train<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+train<-train[,-(1:5)]
+test<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+test<-test[,-(1:5)]
+nzv<-nearZeroVar(train)#Here we find the columns that are degenerate variables (zero or near zero variance)
+train<-train[,-nzv]#Here those variables are removed from the training dataset
+test<-test[,-nzv]  #The same variables are removed from the test dataset
+sum<-colSums(is.na(train))
+asd<-as.integer(which(0<sum))
+train<-train[,-asd]
+test<-test[,-asd]
+asd<-createDataPartition(train$classe,p=0.7,list=FALSE)
+validation<-train[-asd,]
+train<-train[asd,]
+cormat<-cor(train[,-54])
+corrplot(cormat,type = "full",tl.cex=0.5,method="color",order = "FPC")
+missClass = function(values,prediction){(sum((prediction) != values)/length(values))}
+accur = function(values,prediction){1-missClass(values,prediction)}
+```
+
+#Finding viable models
+Once the dataset has been cleansed and the correlation matrix shows that there are several variables that correlate to each other the next step is to propose which models are going to be trained, the first thing that can be seen in the correlation matrix is that there's few clusters of variables that have a strong relation between them, a strong indication that there's some sense in trying to fit a model to this dataset.
+
+On the sencond hand we have to understand what kind of model it's required, since our objective is to infer how well the excercise was made by the athlete, the model we require to train is a classification one, that helps to narrow which models are to be tested, the most classification friendly models that were mentioned thoroughout the course are decision trees, random forests and the linear discriminant analysis, Theres a high chance that the best model will be a random forest because it is an array of decision trees that helps to reduce de possible bias that can be created by training a single tree, here we'll train 3 models to choose the best of them and if there's some sense to it stacking them might be an option.
+
+The three models to be trained are
+\begin{itemize}
+\item Decision tree
+\item Random Forest
+\item Linear Discriminant Analysis
+\end{itemize}
+
+
+```{r modtrain,cache=TRUE}
+#The three different models are trained here, using parallel computing on othe random forest and LDA in order to reduce computation time.
+cl<-makePSOCKcluster((detectCores())-2)#Cluster that indicates how many processes will be created.
+registerDoParallel(cl)  #Starts parallel environment 
+modelrf<-train(classe~.,data=train,method="rf",allowParallel=TRUE)
+modellda<-train(classe~.,data=train,method="lda",allowpParallel=TRUE)
+stopCluster(cl)  #stops threads
+registerDoSEQ()  #returns to sequential excecution
+
+modeltree<-train(classe~.,data=train,method="rpart")#the tree is trained sequentially
+
+saveRDS(modelrf,file = "./Random_forest.rds")
+saveRDS(modeltree,file = "./arbol.rds")
+saveRDS(modellda,file = "./lda.rds")
+
+print(modelrf)
+print(modeltree)
+print(modellda)
+
+
+accur(validation$classe,predict(modelrf,validation))
+accur(validation$classe,predict(modeltree,validation))
+accur(validation$classe,predict(modellda,validation))
+
+```
+#Model Selection and performance
+
+Once the models are trained, the next step is to choose which one is going to be used as the final model, in order to do so it's necessary to get the accuracy of the models, to calculate that the following accuracy function will be used: $acc(values,predicted)=1-\sum_{i=1}^n(values_i==predicted_i)/n$ using this metric to evaluate the models with the validation set it's clear that the best model is the random forest which has a 99.79% accuracy and the worst model is the single decision tree that has an accuracy of 59.45%, from these results the idea of staking the models seems  quite unnecesary because the random forest by itself has a very good accuracy so its more than likely that the model stacking would yield a marginal increase in accuracy at the cost of computation and memory.
+
+In the next code block the random forest is going to be used to classify the test set and its going to save the result to a file.
+
+```{r moduse, echo=TRUE}
+  test$classe=predict(modelrf,test)
+  write.table(test,file="./result.txt")
+```
